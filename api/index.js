@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
+const ws = require('ws');
 
 dotenv.config();
 
@@ -33,8 +34,8 @@ app.use(cookieParser());
 
 // Development settings for cookies
 const cookieSettings = {
-  sameSite: 'none', // Use 'Lax' or 'Strict' in production
-  secure: false,    // Use 'true' in production (over HTTPS)
+    sameSite: 'none', // Use 'Lax' or 'Strict' in production
+    secure: false,    // Use 'true' in production (over HTTPS)
 };
 
 app.use(cors({
@@ -96,7 +97,41 @@ app.post('/register', async (req, res) => {
     }
 });
 
+
 const port = process.env.PORT || 4040;
-app.listen(port, () => {
+const server = app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
+});
+
+const wss = new ws.WebSocketServer({ server });
+wss.on('connection', (connection, req) => {
+    const cookies = req.headers.cookie;
+    if (cookies) {
+        const tokenCookie = cookies
+            .split(';')
+            .find(str => str.trim().startsWith('token='));
+
+        if (tokenCookie) {
+            const token = tokenCookie.split('=')[1];
+            if (token) {
+                jwt.verify(token, jwtSecret, {}, (err, userData) => {
+                    if (err) {
+                        // Handle the error, e.g., close the connection or send an error message to the client
+                        console.error('Token verification failed:', err);
+                        connection.close(); // Close the connection if the token is invalid/expired
+                        return;
+                    }
+
+                    const { userId, username } = userData;
+                    connection.userId = userId;
+                    connection.username = username;
+                });
+            }
+        }
+    }
+    [...wss.clients].forEach(client => {
+        client.send(JSON.stringify({
+            online: [...wss.clients].map(c => ({ userId: c.userId, username: c.username })),
+        }));
+    });
 });
